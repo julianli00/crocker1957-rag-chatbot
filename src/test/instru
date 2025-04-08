@@ -1,0 +1,213 @@
+import re
+
+def extract_ingredients(text):
+    """Extract recipe ingredients"""
+    paragraphs = text.split('\n\n')
+    ingredients = []
+    
+    def clean_ingredient(line):
+        # 移除开头的数字和空格
+        line = re.sub(r'^\d+\.\s*', '', line.strip())
+        # 移除开头的混合指令词
+        line = re.sub(r'^(Mix|Blend|Add|Stir|Beat|Pour|Heat)\s+', '', line)
+        # 移除末尾的标点
+        line = re.sub(r'[.,]$', '', line)
+        # 处理"or"连接的选项
+        if ' or ' in line:
+            parts = line.split(' or ')
+            if len(parts) == 2 and not parts[1].strip().startswith('until'):
+                line = parts[0].strip() + ' or ' + parts[1].strip()
+        # 移除多余的空格和下划线
+        line = re.sub(r'_([^_]+)_', r'\1', line)
+        # 移除连接词
+        line = re.sub(r'\s+and\s+', ' ', line)
+        # 确保melted等描述词保持在同一行
+        line = re.sub(r',\s*(melted|softened|chopped|drained|beaten)', r' \1', line)
+        line = ' '.join(line.split())
+        return line
+    
+    def is_ingredient_line(line):
+        line = line.strip().lower()
+        # 检查是否包含数字或分数
+        has_number = bool(re.search(r'\d', line))
+        has_fraction = bool(re.search(r'\d/\d', line) or any(f in line for f in ['¼', '½', '¾', '⅓', '⅔', '⅛', '⅜', '⅝', '⅞']))
+        # 检查是否包含测量单位
+        has_unit = any(unit.lower() in line for unit in ['cup', 'qt', 'cups', 'tbsp', 'tsp', 'oz', 'pound', 'lb', 'pkg', 'package', 'can'])
+        # 检查是否包含常见配料词
+        has_ingredient = any(ing.lower() in line.lower() for ing in ['milk', 'egg', 'butter', 'sugar', 'salt', 'bisquick', 'corn', 'meal', 'cheese', 'jam', 'preserves', 'melted', 'salmon'])
+        # 检查是否以数字或分数开头
+        starts_with_number = bool(re.match(r'^(\d+|\d+/\d+|\d+\s+\d+/\d+|[¼½¾⅓⅔⅛⅜⅝⅞])', line))
+        # 检查是否包含"melted"或其他常见的配料描述词
+        has_descriptor = any(word in line for word in ['melted', 'soft', 'thick', 'chopped', 'beaten'])
+        
+        # 排除看起来像指令的行
+        looks_like_instruction = bool(re.match(r'^(heat|make|follow|bake|cook|stir|pour|place|top|serve|spoon|drop|roll|cut|mix|blend|try|wash|bring)', line))
+        
+        return (has_number or has_fraction or has_descriptor) and (has_unit or has_ingredient or starts_with_number) and not looks_like_instruction
+    
+    def extract_ingredients_from_text(text):
+        lines = text.split('\n')
+        current_ingredients = []
+        ingredient_buffer = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('_') or line.startswith('('):
+                if ingredient_buffer:
+                    full_ingredient = ' '.join(ingredient_buffer)
+                    full_ingredient = re.split(r'\.\s*(Let|Then|Bake|Add|Pour|Fold|Drop|Place|Heat|Serve)\b', full_ingredient)[0].strip()
+
+                    # 处理带有and连接的配料列表
+                    if 'and' in full_ingredient and re.search(r'\d+\s*(?:cup|tsp|tbsp|oz|lb)', full_ingredient):
+                        parts = re.split(r',\s*(?:and\s+)?|\s+and\s+', full_ingredient)
+                        for part in parts:
+                            cleaned_part = clean_ingredient(part)
+                            if is_ingredient_line(cleaned_part):
+                                current_ingredients.append(cleaned_part)
+                    else:
+                        cleaned_line = clean_ingredient(full_ingredient)
+                        
+                        if is_ingredient_line(cleaned_line):
+                            current_ingredients.append(cleaned_line)
+                    ingredient_buffer = []
+                continue
+                
+            # 跳过看起来像指令的行
+            if re.match(r'^(Heat|Make|Follow|Bake|Cook|Stir|Pour|Place|Top|Serve)', line):
+                continue
+                
+            # 如果这行包含配料列表（用and或逗号连接）
+            if re.search(r'\d+\s*(?:cup|tsp|tbsp|oz|lb)', line) and ('and' in line or ',' in line):
+                parts = re.split(r',\s*(?:and\s+)?|\s+and\s+', line)
+                for part in parts:
+                    cleaned_part = clean_ingredient(part)
+                    if is_ingredient_line(cleaned_part):
+                        current_ingredients.append(cleaned_part)
+                ingredient_buffer = []
+            # 如果这行看起来是配料的一部分，添加到缓冲区
+            elif is_ingredient_line(line) or (ingredient_buffer and not line.startswith('_')):
+                ingredient_buffer.append(line)
+            else:
+                if ingredient_buffer:
+                    full_ingredient = ' '.join(ingredient_buffer)
+                    full_ingredient = re.split(r'\.\s*(Let|Then|Bake|Add|Pour|Fold|Drop|Place|Heat|Serve)\b', full_ingredient)[0].strip()
+                    cleaned_line = clean_ingredient(full_ingredient)
+                    if is_ingredient_line(cleaned_line):
+                        current_ingredients.append(cleaned_line)
+                    ingredient_buffer = []
+                
+        # 处理最后的缓冲区
+        if ingredient_buffer:
+            full_ingredient = ' '.join(ingredient_buffer)
+            full_ingredient = re.split(r'\.\s*(Let|Then|Bake|Add|Pour|Fold|Drop|Place|Heat|Serve)\b', full_ingredient)[0].strip()
+            # 处理带有and连接的配料列表
+            if 'and' in full_ingredient and re.search(r'\d+\s*(?:cup|tsp|tbsp|oz|lb)', full_ingredient):
+                parts = re.split(r',\s*(?:and\s+)?|\s+and\s+', full_ingredient)
+                for part in parts:
+                    cleaned_part = clean_ingredient(part)
+                    if is_ingredient_line(cleaned_part):
+                        current_ingredients.append(cleaned_part)
+            else:
+                cleaned_line = clean_ingredient(full_ingredient)
+                if is_ingredient_line(cleaned_line):
+                    current_ingredients.append(cleaned_line)
+                
+        return current_ingredients
+    
+    # 首先尝试寻找格式化的配料列表
+    for para in paragraphs:
+        # 跳过以下划线开始的段落和以括号开始的段落
+        if para.strip().startswith('_') or para.strip().startswith('('):
+            continue
+            
+        lines = para.split('\n')
+        formatted_ingredients = []
+        is_formatted_list = True
+        indented_lines = 0
+        total_lines = 0
+        
+        # 检查是否是格式化的配料列表
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            total_lines += 1
+            # 检查是否是格式化的配料行（以空格缩进开始）
+            if line.startswith('  ') and is_ingredient_line(line):
+                indented_lines += 1
+                cleaned_line = clean_ingredient(line)
+                if cleaned_line:
+                    formatted_ingredients.append(cleaned_line)
+            elif not line.startswith('_') and not line.startswith('('):
+                # 如果遇到非缩进行且不是注释，检查是否是配料行
+                if is_ingredient_line(line):
+                    cleaned_line = clean_ingredient(line)
+                    if cleaned_line:
+                        formatted_ingredients.append(cleaned_line)
+                else:
+                    is_formatted_list = False
+                    break
+        
+        # 如果找到了格式化的配料列表，直接返回结果
+        if formatted_ingredients and (is_formatted_list or indented_lines >= total_lines * 0.5):
+            return '\n'.join(formatted_ingredients)
+    
+    # 如果没有找到格式化的配料列表，尝试从其他段落中提取
+    for para in paragraphs:
+        # 检查段落是否包含配料列表的特征
+        if (re.match(r'^\s*\d+[¼½¾⅓⅔⅛⅜⅝⅞]?\s*(?:cups?|tbsp|tsp)\s+\w+', para, re.MULTILINE) or
+            re.match(r'^\s*Mix\s+[¼½¾⅓⅔⅛⅜⅝⅞]?\s*(?:cups?|tbsp|cup|tsp)\s+\w+', para, re.MULTILINE) or
+            re.match(r'^\s*Mix\s+\d+\s*(?:cups?|tbsp|tsp)\s+\w+', para, re.MULTILINE) or
+            re.match(r'^\s*[¼½¾⅓⅔⅛⅜⅝⅞]\s*(?:cups?|tbsp|tsp)\s+\w+', para, re.MULTILINE) or
+            re.match(r'^\s*\d+\s*egg', para, re.MULTILINE) or
+            re.match(r'^\s*\d+\s*(?:cups?|tbsp|tsp|oz|pound|lb|pkg|package|can)\s+\w+', para, re.MULTILINE)):
+            
+            current_ingredients = extract_ingredients_from_text(para)
+            if current_ingredients:
+                ingredients.extend(current_ingredients)
+    
+    # 如果还没有找到配料，尝试从其他段落中提取
+    if not ingredients:
+        for para in paragraphs:
+            # 跳过看起来像指令的段落
+            if re.match(r'^(?:Heat|Make|Follow|Form|Use)\b', para):
+                continue
+                
+            # 如果段落包含配料信息
+            if (re.match(r'^Mix\b', para) or
+                re.match(r'^\s*\d+\s*(?:cups?|tbsp|tsp)\b', para) or
+                re.match(r'^\s*[¼½¾⅓⅔⅛⅜⅝⅞]', para) or
+                re.match(r'^\s*(?:a |an |one )\w+', para.lower()) or
+                re.match(r'^\s*\d+\s*egg\b', para.lower()) or
+                re.match(r'^\s*\d+\s*(?:cups?|tbsp|tsp|oz|pound|lb|pkg|package|can)\b', para.lower()) or
+                re.match(r'^\s*Mix\s+\d+\s*cups?\s+', para) or
+                re.match(r'^\s*Mix\s+\d+\s*tbsp\s+', para)):
+                
+                current_ingredients = extract_ingredients_from_text(para)
+                if current_ingredients:
+                    ingredients.extend(current_ingredients)
+    
+    # 移除重复项并保持顺序
+    seen = set()
+    ingredients = [x for x in ingredients if not (x in seen or seen.add(x))]
+    
+    # 将配料列表格式化为多行字符串，确保每个配料都在单独的行上
+    formatted_ingredients = []
+    for ingredient in ingredients:
+        # 如果配料包含"or"，确保它在同一行
+        if ' or ' in ingredient:
+            formatted_ingredients.append(ingredient)
+        else:
+            # 否则，将配料分成单独的行
+            parts = ingredient.split(',')
+            formatted_ingredients.extend([p.strip() for p in parts if p.strip()])
+    
+    return '\n'.join(formatted_ingredients)
+
+a =extract_ingredients("""
+Mix ¾ cup raw cranberries (cut in halves or quarters) and ½ cup
+confectioners’ sugar. Let stand ½ to 1 hr. Then fold into Muffin batter
+(p. 2). Bake. 
+""")
+print(a)
